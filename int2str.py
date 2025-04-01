@@ -74,6 +74,10 @@ def number_to_words(n: float) -> str:
     ore_text = f"{under_hundred(ore)} ører" if ore else ""
 
     result = f"{kroner_text} og {ore_text}" if ore else kroner_text
+
+    # Capitalize the first letter of the result
+    result = result[0].upper() + result[1:]
+    
     return f"minus {result}" if is_negative else result
 
 
