@@ -1,0 +1,194 @@
+#Blackjack game with features of card counting
+#Hidden Commandlist
+#Cheat -  Tells count and recommendation for bet size
+#Deck -  Tells amount of remaining cards in deck
+
+import random
+
+class Card:
+
+    RED = "\033[91m"
+    BLACK = "\033[30m"
+    RESET = "\033[0m"
+
+    SUIT_COLORS = {
+        '♥': RED,
+        '♦': RED,
+        '♣': BLACK,
+        '♠': BLACK
+    }
+
+    def __init__(self, suit, rank):
+        self.suit = suit
+        self.rank = rank
+        self.value = self.get_value()
+
+    def __str__(self):
+        color = self.SUIT_COLORS[self.suit]
+        return f"{color}{self.rank}{self.suit}{self.RESET}"
+
+
+    def get_value(self):
+        if self.rank in ['J', 'Q', 'K']:
+            return 10
+        elif self.rank == 'A':
+            return 11
+        else:
+            return int(self.rank)
+
+class Deck:
+    def __init__(self):
+        suits = ['♥', '♦', '♣', '♠']  # Hearts, Diamonds, Clubs, Spades
+        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']  # Jack, Queen, King, Ace
+        self.cards = [Card(suit, rank) for suit in suits for rank in ranks]
+        random.shuffle(self.cards)
+        self.running_count = 0  # Initialize running count
+
+    def deal_one(self):
+        card = self.cards.pop()
+        self.update_running_count(card)
+        return card
+
+    def update_running_count(self, card):
+        if card.rank in ['2', '3', '4', '5', '6']:
+            self.running_count += 1
+        elif card.rank in ['10', 'J', 'Q', 'K', 'A']:
+            self.running_count -= 1
+
+    def __str__(self):
+        return ', '.join(str(card) for card in self.cards)
+
+class Hand:
+    def __init__(self):
+        self.cards = []
+        self.value = 0
+        self.aces = 0
+
+    def add_card(self, card):
+        self.cards.append(card)
+        self.value += card.value
+        if card.rank == 'A':
+            self.aces += 1
+        self.adjust_for_aces()
+
+    def update_count(self, card):
+        if card.rank in ['2', '3', '4', '5', '6']:
+            self.running_count += 1
+        elif card.rank in ['10', 'J', 'Q', 'K', 'A']:
+            self.running_count -= 1
+
+    def __str__(self):
+        return ', '.join(f"{card.rank}{card.suit}" for card in self.cards)
+    
+    def adjust_for_aces(self):
+        while self.value > 21 and self.aces:
+            self.value -= 10
+            self.aces -= 1
+
+def display_hand(name, hand, hide_first_card=False):
+    if hide_first_card:
+        print(f"{name}'s hand: [Hidden, {hand.cards[1]}]")
+    else:
+        print(f"{name}'s hand: {', '.join(str(card) for card in hand.cards)} (Value: {hand.value})")
+
+def blackjack_game():
+    print("Welcome to Blackjack!")
+    balance = 100
+    deck = Deck()  # Use ONE persistent deck
+
+    while True:
+        if len(deck.cards) < 5:
+            print("Not enough cards left in the deck to continue. Game over!")
+            break
+
+        print(f"\nYour current balance: ${balance}")
+        user_input = input("Place your bet: $").lower()
+
+        if user_input == 'exit':
+            print("Exiting the game.")
+            break
+        elif user_input == 'balance':
+            print(f"Your current balance is: ${balance}")
+            continue
+        elif user_input == 'deck':
+            print(f"Cards left in the deck: {len(deck.cards)}")
+            continue
+        elif user_input == 'cheat':
+            print(f"\n[CHEAT MODE] Running count: {deck.running_count}")
+            if deck.running_count >= 2:
+                print("💡 Count is favorable! Consider betting higher.")
+            else:
+                print("🧐 Count isn't hot right now. Maybe go easy on the bet.")
+            continue
+
+        try:
+            bet = int(user_input)
+            if bet > balance:
+                print("You don't have enough balance to place this bet.")
+                continue
+            elif bet <= 0:
+                print("Bet must be greater than $0.")
+                continue
+        except ValueError:
+            print("Invalid input. Please enter a valid amount.")
+            continue
+
+        # Create hands
+        player_hand = Hand()
+        dealer_hand = Hand()
+
+        # Deal cards
+        player_hand.add_card(deck.deal_one())
+        player_hand.add_card(deck.deal_one())
+        dealer_hand.add_card(deck.deal_one())
+        dealer_hand.add_card(deck.deal_one())
+
+        # Show hands
+        display_hand("Player", player_hand)
+        display_hand("Dealer", dealer_hand, hide_first_card=True)
+
+        # Player's turn
+        while player_hand.value < 21:
+            action = input("Do you want to hit or stay?").lower()
+            if action == 'hit':
+                player_hand.add_card(deck.deal_one())
+                display_hand("Player", player_hand)
+            elif action == 'stay':
+                break
+            elif action == 'cheat':
+                print(f"\n[CHEAT MODE] Running count: {deck.running_count}")
+                if deck.running_count >= 2:
+                    print("💡 Higher odds of high cards.")
+                else:
+                    print("🧐 Lower odds of high cards.")
+            else:
+                print("Invalid input. Please type 'hit' or 'stay'")
+
+        if player_hand.value > 21:
+            print("Player busts! Dealer wins.")
+            balance -= bet
+            continue
+
+        # Dealer's turn
+        display_hand("Dealer", dealer_hand)
+        while dealer_hand.value < 17:
+            dealer_hand.add_card(deck.deal_one())
+            display_hand("Dealer", dealer_hand)
+
+        # Determine winner
+        if dealer_hand.value > 21 or player_hand.value > dealer_hand.value:
+            print("Player wins!")
+            balance += bet
+        elif player_hand.value < dealer_hand.value:
+            print("Dealer wins!")
+            balance -= bet
+        else:
+            print("It's a tie!")
+
+        if balance <= 0:
+            print("You are out of money! Game over.")
+            break
+
+
+if __name__ == "__main__":
+    blackjack_game()
