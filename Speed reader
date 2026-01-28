@@ -1,0 +1,225 @@
+import tkinter as tk
+from tkinter import ttk
+import re
+from pythainlp.tokenize import word_tokenize
+
+# ================= CONFIG =================
+FONT_SIZE = 46
+BG_COLOR = "black"
+TEXT_COLOR = "white"
+PIVOT_COLOR = "red"
+
+# English
+EN_DEFAULT_WPM = 400
+EN_MIN_WPM = 200
+EN_MAX_WPM = 1000
+
+# Thai (comfort)
+TH_DEFAULT_WPM = 40
+TH_MIN_WPM = 20
+TH_MAX_WPM = 350
+
+PAUSE_COMMA = 1.5
+PAUSE_PERIOD = 2.5
+PAUSE_PARAGRAPH = 3.0
+# =========================================
+
+
+def detect_language(text):
+    thai_chars = sum(1 for c in text if "\u0E00" <= c <= "\u0E7F")
+    return "thai" if thai_chars / max(len(text), 1) > 0.3 else "english"
+
+
+# -------- ENGLISH --------
+def tokenize_english(text):
+    paragraphs = text.split("\n\n")
+    tokens = []
+    for p in paragraphs:
+        tokens.extend(re.findall(r"\w+|[.,!?;:]", p))
+        tokens.append("\n")
+    return tokens
+
+
+def get_pivot_index(word):
+    if len(word) <= 3:
+        return 0
+    elif len(word) <= 6:
+        return 1
+    elif len(word) <= 9:
+        return 2
+    return 3
+
+
+# -------- THAI --------
+def tokenize_thai_adaptive(text, wpm):
+    words = word_tokenize(text, engine="newmm")
+    chunks = []
+
+    if wpm < 180:
+        max_chunk = 2
+    elif wpm < 260:
+        max_chunk = 3
+    else:
+        max_chunk = 4
+
+    current = []
+    for w in words:
+        current.append(w)
+        if len(current) >= max_chunk or w in "ฯ.!?":
+            chunks.append("".join(current))
+            current = []
+
+    if current:
+        chunks.append("".join(current))
+
+    return chunks
+
+
+class RSVPReader:
+    def __init__(self, root):
+        self.root = root
+        self.root.configure(bg=BG_COLOR)
+        self.root.title("Adaptive RSVP Reader")
+
+        self.tokens = []
+        self.index = 0
+        self.running = False
+        self.mode = "english"
+
+        # -------- INPUT --------
+        self.textbox = tk.Text(root, height=6, width=70, font=("Tahoma", 12))
+        self.textbox.pack(pady=10)
+
+        # -------- DISPLAYS --------
+        # English (ORP)
+        self.en_display = tk.Text(
+            root, height=1, width=30,
+            font=("Consolas", FONT_SIZE, "bold"),
+            bg=BG_COLOR, fg=TEXT_COLOR,
+            bd=0, highlightthickness=0
+        )
+        self.en_display.tag_config("pivot", foreground=PIVOT_COLOR)
+
+        # Thai (true centered)
+        self.th_display = tk.Label(
+            root,
+            text="",
+            font=("Tahoma", FONT_SIZE, "bold"),
+            bg=BG_COLOR,
+            fg=TEXT_COLOR,
+            anchor="center",
+            justify="center"
+        )
+
+        # -------- CONTROLS --------
+        controls = ttk.Frame(root)
+        controls.pack()
+
+        ttk.Button(controls, text="Start", command=self.start).grid(row=0, column=0, padx=5)
+        ttk.Button(controls, text="Pause", command=self.toggle).grid(row=0, column=1, padx=5)
+        ttk.Button(controls, text="Reset", command=self.reset).grid(row=0, column=2, padx=5)
+
+        self.wpm_label = ttk.Label(root, text="")
+        self.wpm_label.pack()
+
+        self.speed = ttk.Scale(root, orient="horizontal", command=self.set_speed)
+        self.speed.pack(fill="x", padx=40)
+
+        # -------- KEYS --------
+        self.root.bind("<space>", lambda e: self.toggle())
+        self.root.bind("<Escape>", lambda e: self.reset())
+        self.root.bind("<Left>", lambda e: self.adjust_speed(-20))
+        self.root.bind("<Right>", lambda e: self.adjust_speed(20))
+
+    # -------- SPEED --------
+    def configure_speed(self):
+        if self.mode == "thai":
+            self.wpm = TH_DEFAULT_WPM
+            self.speed.config(from_=TH_MIN_WPM, to=TH_MAX_WPM)
+        else:
+            self.wpm = EN_DEFAULT_WPM
+            self.speed.config(from_=EN_MIN_WPM, to=EN_MAX_WPM)
+
+        self.speed.set(self.wpm)
+        self.wpm_label.config(text=f"{self.mode.upper()} · WPM: {self.wpm}")
+
+    def set_speed(self, value):
+        self.wpm = int(float(value))
+        self.wpm_label.config(text=f"{self.mode.upper()} · WPM: {self.wpm}")
+
+    def adjust_speed(self, delta):
+        self.wpm += delta
+        self.speed.set(self.wpm)
+        self.wpm_label.config(text=f"{self.mode.upper()} · WPM: {self.wpm}")
+
+    # -------- SESSION --------
+    def start(self):
+        raw = self.textbox.get("1.0", "end").strip()
+        if not raw:
+            return
+
+        self.mode = detect_language(raw)
+        self.configure_speed()
+
+        # Switch display
+        self.en_display.pack_forget()
+        self.th_display.pack_forget()
+
+        if self.mode == "thai":
+            self.tokens = tokenize_thai_adaptive(raw, self.wpm)
+            self.th_display.pack(pady=50)
+        else:
+            self.tokens = tokenize_english(raw)
+            self.en_display.pack(pady=40)
+
+        self.index = 0
+        self.running = True
+        self.show_next()
+
+    def toggle(self):
+        self.running = not self.running
+        if self.running:
+            self.show_next()
+
+    def reset(self):
+        self.running = False
+        self.index = 0
+        self.en_display.delete("1.0", "end")
+        self.th_display.config(text="")
+
+    # -------- TIMING --------
+    def compute_delay(self, token):
+        base = 60000 / self.wpm
+        if token == "\n":
+            return base * PAUSE_PARAGRAPH
+        if token in ".!?ฯ":
+            return base * PAUSE_PERIOD
+        if token in ",;:":
+            return base * PAUSE_COMMA
+        return base
+
+    # -------- LOOP --------
+    def show_next(self):
+        if not self.running or self.index >= len(self.tokens):
+            return
+
+        token = self.tokens[self.index]
+        self.index += 1
+
+        if self.mode == "thai":
+            self.th_display.config(text=token)
+        else:
+            self.en_display.delete("1.0", "end")
+            pivot = get_pivot_index(token)
+            left = " " * (12 - pivot) + token[:pivot]
+            self.en_display.insert("1.0", left)
+            self.en_display.insert("end", token[pivot:pivot + 1], "pivot")
+            self.en_display.insert("end", token[pivot + 1:])
+
+        self.root.after(int(self.compute_delay(token)), self.show_next)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    RSVPReader(root)
+    root.mainloop()
